@@ -102,6 +102,7 @@ wheels/
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
+pip-*
 
 # Unit test / coverage reports
 htmlcov/
@@ -154,6 +155,8 @@ celerybeat-schedule
 .venv*
 venv*/
 ENV*/
+Pipfile
+Pipfile.lock
 
 # Spyder project settings
 .spyderproject
