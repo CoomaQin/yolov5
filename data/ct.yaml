@@ -16,10 +16,10 @@ val:
   - '../dataset/MIO-TCD/data/images/test/' 
 
 # number of classes
-nc: 11
+nc: 12
 
 # class names
-names: ['pedestrian', 'bicycle', 'car', 'motorcycle', 'bus', 'motorized_vehicle', 'single_unit_truck', "articulated_truck", "non-motorized_vehicle", "pickup_truck", "work_van"]
+names: ['pedestrian', 'bicycle', 'car', 'motorcycle', 'bus', 'motorized_vehicle', 'single_unit_truck', "articulated_truck", "non-motorized_vehicle", "pickup_truck", "work_van", "is_PL"]
 
 # Print classes
 # with open('data/coco.yaml') as f:
