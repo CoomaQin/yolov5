@@ -127,26 +127,26 @@ class ComputeLoss:
             n = b.shape[0]  # number of targets
             if n:
                 ps = pi[b, a, gj, gi]  # prediction subset corresponding to targets
-
+                t = torch.full_like(ps[:, 5:], self.cn, device=device)  # targets
+                t[range(n), tcls[i]] = self.cp
                 # Regression
                 pxy = ps[:, :2].sigmoid() * 2 - 0.5
                 pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
                 iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
-                lbox += torch.mul(ps[:, -1], iou).mean()  # false positive iou loss
+                lbox += torch.absolute(torch.mul(t[:, -1], iou).mean()) # false positive iou loss
 
                 # Objectness
                 score_iou = iou.detach().clamp(0).type(tobj.dtype)
                 if self.sort_obj_iou:
                     sort_id = torch.argsort(score_iou)
                     b, a, gj, gi, score_iou = b[sort_id], a[sort_id], gj[sort_id], gi[sort_id], score_iou[sort_id]
-                tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * torch.mul(ps[:, -1], score_iou)  # iou ratio
+                tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * torch.mul(t[:, -1], score_iou)  # iou ratio
 
                 # Classification
                 if self.nc > 1:  # cls loss (only if multiple classes)
-                    t = torch.full_like(ps[:, 5:], self.cn, device=device)  # targets
-                    t[range(n), tcls[i]] = self.cp
-                    flag = torch.reshape(torch.ones(ps.shape[0], device=device) - ps[:, -1], (-1, 1))
+                    flag = torch.reshape(torch.ones(t.shape[0], device=device) - t[:, -1], (-1, 1))
+                    # print("flag", flag)
                     lcls += self.BCEcls(torch.mul(flag, ps[:, 5:-1]) , torch.mul(flag, t[:, :-1]))  # BCE
 
                 # Append targets to text file
