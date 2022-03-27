@@ -110,7 +110,7 @@ class ComputeLoss:
         det = de_parallel(model).model[-1]  # Detect() module
         self.balance = {3: [4.0, 1.0, 0.4]}.get(det.nl, [4.0, 1.0, 0.25, 0.06, 0.02])  # P3-P7
         self.ssi = list(det.stride).index(16) if autobalance else 0  # stride 16 index
-        self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, 0, h, autobalance
+        self.BCEcls, self.BCEobj, self.gr, self.hyp, self.autobalance = BCEcls, BCEobj, 1.0, h, autobalance
         for k in 'na', 'nc', 'nl', 'anchors':
             setattr(self, k, getattr(det, k))
 
@@ -133,30 +133,30 @@ class ComputeLoss:
                 pxy = ps[:, :2].sigmoid() * 2 - 0.5
                 pwh = (ps[:, 2:4].sigmoid() * 2) ** 2 * anchors[i]
                 pbox = torch.cat((pxy, pwh), 1)  # predicted box
-                iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=False, CIoU=True)  # iou(prediction, target)
-                lbox += torch.absolute(torch.mul(t[:, -1], iou).mean()) # false positive iou loss
+                iou = bbox_iou(pbox.T, tbox[i], x1y1x2y2=False)  # iou(prediction, target)
+                lbox += torch.mul(t[:, -1], (1.0 - iou)).mean() # false positive iou loss
 
                 # Objectness
                 score_iou = iou.detach().clamp(0).type(tobj.dtype)
                 if self.sort_obj_iou:
                     sort_id = torch.argsort(score_iou)
                     b, a, gj, gi, score_iou = b[sort_id], a[sort_id], gj[sort_id], gi[sort_id], score_iou[sort_id]
-                tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * torch.mul(t[:, -1], score_iou)  # iou ratio
+                tobj[b, a, gj, gi] = (1.0 - self.gr) + self.gr * torch.mul(t[:, -1], (1.0 - score_iou))  # iou ratio
 
                 # Classification
                 if self.nc > 1:  # cls loss (only if multiple classes)
                     flag = torch.reshape(torch.ones(t.shape[0], device=device) - t[:, -1], (-1, 1))
-                    # print("flag", flag)
-                    lcls += self.BCEcls(torch.mul(flag, ps[:, 5:-1]) , torch.mul(flag, t[:, :-1]))  # BCE
+                    lcls += torch.exp(-self.hyp['cls_mse'] * self.BCEcls(torch.mul(flag, ps[:, 5:-1]) , torch.mul(flag, t[:, :-1])))  # BCE
+                    # print("lcls", lcls, torch.exp(-self.hyp['box'] * self.BCEcls(torch.mul(flag, ps[:, 5:-1]) , torch.mul(flag, t[:, :-1]))))
 
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:
                 #     [file.write('%11.5g ' * 4 % tuple(x) + '\n') for x in torch.cat((txy[i], twh[i]), 1)]
             obji = self.BCEobj(pi[..., 4], tobj)
+
             lobj += obji * self.balance[i]  # obj loss
             if self.autobalance:
                 self.balance[i] = self.balance[i] * 0.9999 + 0.0001 / obji.detach().item()
-
         if self.autobalance:
             self.balance = [x / self.balance[self.ssi] for x in self.balance]
         lbox *= self.hyp['box']
