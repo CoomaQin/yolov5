@@ -342,4 +342,5 @@ def plot_mc_curve(px, py, save_dir='mc_curve.png', names=(), xlabel='Confidence'
     plt.close()
  
 def auc_score():
+    pass
     # compute auc score
