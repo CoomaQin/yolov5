@@ -11,17 +11,17 @@
 
 # train and val data as 1) directory: path/images/, 2) file: path/images.txt, or 3) list: [path1/images/, path2/images/]
 train: 
-  - '../dataset/MIO-TCD/data/images/debug2/'
+  - '../dataset/bdd100k/images/train/'
 ce:
-  - '../dataset/MIO-TCD/data/images/debug/'
+  - '../dataset/bdd100k/images/ce_fpa/'
 val: 
-  - '../dataset/MIO-TCD/data/images/test/' 
+  - '../dataset/bdd100k/images/test/' 
 
 # number of classes
-nc: 12
+nc: 14
 
 # class names
-names: ['pedestrian', 'bicycle', 'car', 'motorcycle', 'bus', 'motorized_vehicle', 'single_unit_truck', "articulated_truck", "non-motorized_vehicle", "pickup_truck", "work_van", "is_FL"]
+names: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', "FL"]
 
 # Print classes
 # with open('data/coco.yaml') as f:
