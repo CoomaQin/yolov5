@@ -51,19 +51,22 @@ def detection_to_instance(imgs, targets):
     # imgs(image, channel, width, height)
     # targets(image, class, x, y, w, h)
     width, height = imgs.shape[-2], imgs.shape[-1]
-    transform = torchvision.transforms.Resize((64, 64))
+    transform = torchvision.transforms.Compose([
+        torchvision.transforms.Resize(64),
+        torchvision.transforms.CenterCrop(64),
+        torchvision.transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
     output_x, output_y = None, None
     for k, t in enumerate(targets):
         idx, c, x, y, w, h = t
         x1, x2, y1, y2 = int((x - w / 2).item() * width), int((x + w / 2).item() * width), int((y - h / 2).item() * height), int((y + h / 2).item() * height)
-        img = imgs[idx.long(), :, x1:x2, y1:y2]
+        img = imgs[idx.long(), :, x1:x2, y1:y2].float()
         if k == 0:
             output_x = torch.unsqueeze(transform(img), 0)
             output_y = c.reshape(1)
         else:
             output_x = torch.cat((output_x, torch.unsqueeze(transform(img), 0)), 0)
             output_y = torch.cat((output_y, c.reshape(1)), 0)
-    print(output_x.shape, output_y.shape)
     return output_x, output_y
 
 

@@ -30,6 +30,7 @@ import yaml
 from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import SGD, Adam, AdamW, lr_scheduler
+import torchvision.transforms as transforms
 from tqdm import tqdm
 
 FILE = Path(__file__).resolve()
@@ -37,6 +38,7 @@ ROOT = FILE.parents[0]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
+sys.path.append(os.path.abspath('../prototype_net'))
 
 import val  # for end-of-epoch mAP
 from models.experimental import attempt_load
@@ -57,6 +59,9 @@ from utils.loss import ComputeLoss
 from utils.metrics import fitness
 from utils.plots import plot_evolve, plot_labels
 from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, select_device, torch_distributed_zero_first
+
+from prototypical_loss import yolo_prototypical_loss as loss_fn
+from pn_util import get_model_dataloader
 
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv('RANK', -1))
@@ -130,6 +135,8 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         LOGGER.info(f'Transferred {len(csd)}/{len(model.state_dict())} items from {weights}')  # report
     else:
         model = Model(cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
+
+    pn_model, pn_dataloader = get_model_dataloader()
 
     # Freeze
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
@@ -234,7 +241,6 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                                               image_weights=opt.image_weights, quad=opt.quad,
                                               prefix=colorstr('ce: '), shuffle=True)
 
-    
     mlc = int(np.concatenate(dataset.labels, 0)[:, 0].max())  # max label class
     nb = len(ce_loader)  # number of batches
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
@@ -321,7 +327,8 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         optimizer.zero_grad()
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
             rt_imgs, rt_targets, _, _ = next(train_loader.iterator)
-            detection_to_instance(rt_imgs, rt_targets)
+            rt_instance, rt_instance_target = detection_to_instance(rt_imgs, rt_targets)
+            rt_instance, rt_instance_target = rt_instance.to(device), rt_instance_target.to(device)
             ni = i + nb * epoch  # number integrated batches (since train start)
             # uint8 to float32, 0-255 to 0.0-1.0
             imgs = imgs.to(device, non_blocking=True).float() / 255  
@@ -357,6 +364,15 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
                 if opt.quad:
                     loss *= 4.
+
+                pn_iter = iter(pn_dataloader)
+                for batch in pn_iter:
+                    supportx, supporty = batch
+                    supportx, supporty = supportx.to(device), supporty.to(device)
+                    support_output = pn_model(supportx)
+                    query_output = pn_model(rt_instance)
+                    dists = loss_fn(query_output, rt_instance_target, support_output, supporty)  
+                    print(dists.shape)               
 
             # Backward
             scaler.scale(loss).backward()
