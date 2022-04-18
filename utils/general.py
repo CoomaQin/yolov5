@@ -47,6 +47,25 @@ cv2.setNumThreads(0)  # prevent OpenCV from multithreading (incompatible with Py
 os.environ['NUMEXPR_MAX_THREADS'] = str(NUM_THREADS)  # NumExpr max threads
 os.environ['OMP_NUM_THREADS'] = str(NUM_THREADS)  # OpenMP max threads (PyTorch and SciPy)
 
+def detection_to_instance(imgs, targets):
+    # imgs(image, channel, width, height)
+    # targets(image, class, x, y, w, h)
+    width, height = imgs.shape[-2], imgs.shape[-1]
+    transform = torchvision.transforms.Resize((64, 64))
+    output_x, output_y = None, None
+    for k, t in enumerate(targets):
+        idx, c, x, y, w, h = t
+        x1, x2, y1, y2 = int((x - w / 2).item() * width), int((x + w / 2).item() * width), int((y - h / 2).item() * height), int((y + h / 2).item() * height)
+        img = imgs[idx.long(), :, x1:x2, y1:y2]
+        if k == 0:
+            output_x = torch.unsqueeze(transform(img), 0)
+            output_y = c.reshape(1)
+        else:
+            output_x = torch.cat((output_x, torch.unsqueeze(transform(img), 0)), 0)
+            output_y = torch.cat((output_y, c.reshape(1)), 0)
+    print(output_x.shape, output_y.shape)
+    return output_x, output_y
+
 
 def is_kaggle():
     # Is environment a Kaggle Notebook?

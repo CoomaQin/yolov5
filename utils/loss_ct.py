@@ -164,7 +164,7 @@ class ComputeLoss_CT:
         if self.autobalance:
             self.balance = [x / self.balance[self.ssi] for x in self.balance]
         lbox *= self.hyp['box']
-        lobj *= self.hyp['obj']
+        lobj *= self.hyp['obj_ct']
         lcls *= self.hyp['cls']
         bs = tobj.shape[0]  # batch size
 

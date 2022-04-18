@@ -49,7 +49,7 @@ from utils.downloads import attempt_download
 from utils.general import (LOGGER, check_dataset, check_file, check_git_status, check_img_size, check_requirements,
                            check_suffix, check_yaml, colorstr, get_latest_run, increment_path, init_seeds,
                            intersect_dicts, labels_to_class_weights, labels_to_image_weights, methods, one_cycle,
-                           print_args, print_mutation, strip_optimizer)
+                           print_args, print_mutation, strip_optimizer, detection_to_instance)
 from utils.loggers import Loggers
 from utils.loggers.wandb.wandb_utils import check_wandb_resume
 from utils.loss_ct import ComputeLoss_CT
@@ -233,6 +233,8 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                                               rect=opt.rect, rank=LOCAL_RANK, workers=workers,
                                               image_weights=opt.image_weights, quad=opt.quad,
                                               prefix=colorstr('ce: '), shuffle=True)
+
+    
     mlc = int(np.concatenate(dataset.labels, 0)[:, 0].max())  # max label class
     nb = len(ce_loader)  # number of batches
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
@@ -268,6 +270,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     hyp['box'] *= 3 / nl  # scale to layers
     hyp['cls'] *= nc / 80 * 3 / nl  # scale to classes and layers
     hyp['obj'] *= (imgsz / 640) ** 2 * 3 / nl  # scale to image size and layers
+    hyp['obj_ct'] *= (imgsz / 640) ** 2 * 3 / nl  # scale to image size and layers
     hyp['label_smoothing'] = opt.label_smoothing
     model.nc = nc  # attach number of classes to model
     model.hyp = hyp  # attach hyperparameters to model
@@ -318,6 +321,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         optimizer.zero_grad()
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
             rt_imgs, rt_targets, _, _ = next(train_loader.iterator)
+            detection_to_instance(rt_imgs, rt_targets)
             ni = i + nb * epoch  # number integrated batches (since train start)
             # uint8 to float32, 0-255 to 0.0-1.0
             imgs = imgs.to(device, non_blocking=True).float() / 255  
