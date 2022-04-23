@@ -60,8 +60,8 @@ from utils.metrics import fitness
 from utils.plots import plot_evolve, plot_labels
 from utils.torch_utils import EarlyStopping, ModelEMA, de_parallel, select_device, torch_distributed_zero_first
 
-from prototypical_loss import yolo_prototypical_loss as loss_fn
-from pn_util import get_model_dataloader
+# from prototypical_loss import yolo_prototypical_loss as loss_fn
+# from pn_util import get_model_dataloader
 
 LOCAL_RANK = int(os.getenv('LOCAL_RANK', -1))  # https://pytorch.org/docs/stable/elastic/run.html
 RANK = int(os.getenv('RANK', -1))
@@ -136,7 +136,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
     else:
         model = Model(cfg, ch=3, nc=nc, anchors=hyp.get('anchors')).to(device)  # create
 
-    pn_model, pn_dataloader = get_model_dataloader()
+    # pn_model, pn_dataloader = get_model_dataloader()
 
     # Freeze
     freeze = [f'model.{x}.' for x in (freeze if len(freeze) > 1 else range(freeze[0]))]  # layers to freeze
@@ -228,7 +228,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
         LOGGER.info('Using SyncBatchNorm()')
 
     # Trainloader
-    train_loader, _ = create_dataloader(train_path, imgsz, batch_size // WORLD_SIZE, gs, single_cls,
+    train_loader, dataset = create_dataloader(train_path, imgsz, batch_size // WORLD_SIZE, gs, single_cls,
                                               hyp=hyp, augment=True, cache=None if opt.cache == 'val' else opt.cache,
                                               rect=opt.rect, rank=LOCAL_RANK, workers=workers,
                                               image_weights=opt.image_weights, quad=opt.quad,
@@ -242,7 +242,7 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
                                               prefix=colorstr('ce: '), shuffle=True)
 
     mlc = int(np.concatenate(dataset.labels, 0)[:, 0].max())  # max label class
-    nb = len(ce_loader)  # number of batches
+    nb = len(train_loader)  # number of batches
     assert mlc < nc, f'Label class {mlc} exceeds nc={nc} in {data}. Possible class labels are 0-{nc - 1}'
 
     # Process 0
@@ -319,20 +319,21 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
 
         mloss = torch.zeros(6, device=device)  # mean losses
         if RANK != -1:
-            ce_loader.sampler.set_epoch(epoch)
-        pbar = enumerate(ce_loader)
+            train_loader.sampler.set_epoch(epoch)
+        pbar = enumerate(train_loader)
         LOGGER.info(('\n' + '%10s' * 10) % ('Epoch', 'gpu_mem', 'rt_box', 'rt_obj', 'rt_cls', 'ct_box', 'fl_obj', 'miscls', 'labels', 'img_size'))
+        # LOGGER.info(('\n' + '%10s' * 7) % ('Epoch', 'gpu_mem', 'rt_box', 'rt_obj', 'rt_cls', 'labels', 'img_size'))
         if RANK in [-1, 0]:
             pbar = tqdm(pbar, total=nb, bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')  # progress bar
         optimizer.zero_grad()
         for i, (imgs, targets, paths, _) in pbar:  # batch -------------------------------------------------------------
-            rt_imgs, rt_targets, _, _ = next(train_loader.iterator)
-            rt_instance, rt_instance_target = detection_to_instance(rt_imgs, rt_targets)
-            rt_instance, rt_instance_target = rt_instance.to(device), rt_instance_target.to(device)
+            ct_imgs, ct_targets, _, _ = next(ce_loader.iterator)
+            ct_instance, ct_instance_target = detection_to_instance(ct_imgs, ct_targets)
+            ct_instance, ct_instance_target = ct_instance.to(device), ct_instance_target.to(device)
             ni = i + nb * epoch  # number integrated batches (since train start)
             # uint8 to float32, 0-255 to 0.0-1.0
             imgs = imgs.to(device, non_blocking=True).float() / 255  
-            rt_imgs = rt_imgs.to(device, non_blocking=True).float() / 255
+            ct_imgs = ct_imgs.to(device, non_blocking=True).float() / 255
             # Warmup
             if ni <= nw:
                 xi = [0, nw]  # x interp
@@ -355,24 +356,23 @@ def train(hyp,  # path/to/hyp.yaml or hyp dictionary
             # Forward
             with amp.autocast(enabled=cuda):
                 pred = model(imgs)  # forward
-                rt_pred = model(rt_imgs) 
-                loss_ct, loss_items_ct = compute_loss_ct(pred, targets.to(device))  # counter training loss
-                loss_rt, loss_items_rt = compute_loss(rt_pred, rt_targets.to(device))  # regular training loss
-                loss = loss_ct + loss_rt
+                ct_pred = model(ct_imgs) 
+                loss_ct, loss_items_ct = compute_loss_ct(ct_pred, ct_targets.to(device))  # counter training loss
+                loss_rt, loss_items_rt = compute_loss(pred, targets.to(device))  # regular training loss
+                loss = loss_rt + loss_ct
                 loss_items = torch.cat((loss_items_ct, loss_items_rt))
                 if RANK != -1:
                     loss *= WORLD_SIZE  # gradient averaged between devices in DDP mode
                 if opt.quad:
                     loss *= 4.
 
-                pn_iter = iter(pn_dataloader)
-                for batch in pn_iter:
-                    supportx, supporty = batch
-                    supportx, supporty = supportx.to(device), supporty.to(device)
-                    support_output = pn_model(supportx)
-                    query_output = pn_model(rt_instance)
-                    dists = loss_fn(query_output, rt_instance_target, support_output, supporty)  
-                    print(dists.shape)               
+                # pn_iter = iter(pn_dataloader)
+                # for batch in pn_iter:
+                #     supportx, supporty = batch
+                #     supportx, supporty = supportx.to(device), supporty.to(device)
+                #     support_output = pn_model(supportx)
+                #     query_output = pn_model(rt_instance)
+                #     dists = loss_fn(query_output, rt_instance_target, support_output, supporty)  
 
             # Backward
             scaler.scale(loss).backward()
